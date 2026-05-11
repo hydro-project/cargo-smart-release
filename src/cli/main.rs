@@ -122,6 +122,8 @@ fn to_bump_spec(spec: &str) -> anyhow::Result<cargo_smart_release::version::Bump
         "major" | "Major" => Major,
         "keep" | "Keep" => Keep,
         "auto" | "Auto" => Auto,
+        "pre" => PreRelease("rc".to_string()),
+        s if s.starts_with("pre:") => PreRelease(s[4..].to_string()),
         unknown_spec => anyhow::bail!("Unknown bump specification: {:?}", unknown_spec),
     })
 }

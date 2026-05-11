@@ -35,18 +35,22 @@ pub enum SubCommands {
 
         /// Specify the kind of version bump you seek for the crate and potentially it's dependencies.
         ///
-        /// Can be 'major', 'minor' or 'patch', 'keep' and 'auto'.
+        /// Can be 'major', 'minor', 'patch', 'keep', 'auto', 'pre', or 'pre:<label>'.
         /// With 'keep', the current version will be kept, useful if versions are specified by hand in the manifest.
+        /// With 'pre' or 'pre:<label>', a pre-release version is created or incremented (e.g. 'pre:beta' produces
+        /// 1.1.0-beta.1, then 1.1.0-beta.2, etc.). Plain 'pre' defaults to the 'rc' label.
         ///
         /// The default is 'auto', which derives the necessary information from the git commit history and occasional
-        /// conventional messages.
+        /// conventional messages. If the current version already has a pre-release identifier, 'auto' will stay
+        /// within the pre-release series.
         #[clap(long, short = 'b', help_heading = Some("MAJOR"))]
         bump: Option<String>,
 
         /// Specify the kind of version bump to apply to dependencies only.
         ///
-        /// Can be 'major', 'minor' or 'patch', 'keep' and 'auto'.
+        /// Can be 'major', 'minor', 'patch', 'keep', 'auto', 'pre', or 'pre:<label>'.
         /// With 'keep', the current version will be kept, useful if versions are specified by hand in the manifest.
+        /// With 'pre' or 'pre:<label>', a pre-release version is created or incremented.
         ///
         /// The default is 'auto', which derives the necessary information from the git commit history and occasional
         /// conventional messages.
