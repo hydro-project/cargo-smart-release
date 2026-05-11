@@ -45,7 +45,7 @@ pub fn try_to_published_crate_and_new_version<'meta, 'a>(
 }
 
 pub fn is_pre_release_version(semver: &Version) -> bool {
-    semver.major == 0
+    semver.major == 0 || !semver.pre.is_empty()
 }
 
 pub fn is_top_level_package(manifest_path: &Utf8Path, repo: &gix::Repository) -> bool {
