@@ -250,3 +250,176 @@ pub(crate) fn rhs_is_breaking_bump_for_lhs(lhs: &Version, rhs: &Version) -> bool
         rhs.major > lhs.major || rhs.minor > lhs.minor
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use semver::Version;
+
+    use super::*;
+
+    mod bump_pre_release_fn {
+        use super::*;
+
+        #[test]
+        fn from_stable_creates_new_pre_release() {
+            let mut v = Version::parse("1.0.0").unwrap();
+            bump_pre_release(&mut v, "beta");
+            assert_eq!(v, Version::parse("1.1.0-beta.1").unwrap());
+        }
+
+        #[test]
+        fn increments_same_label() {
+            let mut v = Version::parse("1.1.0-beta.1").unwrap();
+            bump_pre_release(&mut v, "beta");
+            assert_eq!(v, Version::parse("1.1.0-beta.2").unwrap());
+        }
+
+        #[test]
+        fn changes_label_resets_counter() {
+            let mut v = Version::parse("1.1.0-beta.3").unwrap();
+            bump_pre_release(&mut v, "rc");
+            assert_eq!(v, Version::parse("1.1.0-rc.1").unwrap());
+        }
+
+        #[test]
+        fn from_zero_x_stable() {
+            let mut v = Version::parse("0.5.0").unwrap();
+            bump_pre_release(&mut v, "alpha");
+            assert_eq!(v, Version::parse("0.6.0-alpha.1").unwrap());
+        }
+
+        #[test]
+        fn pre_without_numeric_suffix() {
+            let mut v = Version::parse("1.0.0-beta").unwrap();
+            bump_pre_release(&mut v, "beta");
+            assert_eq!(v, Version::parse("1.0.0-beta.1").unwrap());
+        }
+    }
+
+    mod graduation {
+        use super::*;
+
+        #[test]
+        fn patch_on_pre_release_strips_pre() {
+            let mut v = Version::parse("1.0.0-beta.1").unwrap();
+            bump_major_minor_patch(&mut v, BumpSpec::Patch);
+            assert_eq!(v, Version::parse("1.0.0").unwrap());
+        }
+
+        #[test]
+        fn patch_on_pre_release_with_patch() {
+            let mut v = Version::parse("1.0.1-beta.1").unwrap();
+            bump_major_minor_patch(&mut v, BumpSpec::Patch);
+            assert_eq!(v, Version::parse("1.0.1").unwrap());
+        }
+
+        #[test]
+        fn minor_on_pre_release_strips_pre() {
+            let mut v = Version::parse("1.1.0-beta.1").unwrap();
+            bump_major_minor_patch(&mut v, BumpSpec::Minor);
+            assert_eq!(v, Version::parse("1.1.0").unwrap());
+        }
+
+        #[test]
+        fn minor_on_pre_release_with_patch_bumps_minor() {
+            let mut v = Version::parse("1.0.1-beta.1").unwrap();
+            bump_major_minor_patch(&mut v, BumpSpec::Minor);
+            assert_eq!(v, Version::parse("1.1.0").unwrap());
+        }
+
+        #[test]
+        fn major_on_pre_release_strips_pre() {
+            let mut v = Version::parse("2.0.0-beta.1").unwrap();
+            bump_major_minor_patch(&mut v, BumpSpec::Major);
+            assert_eq!(v, Version::parse("2.0.0").unwrap());
+        }
+
+        #[test]
+        fn major_on_pre_release_with_minor_bumps_major() {
+            let mut v = Version::parse("1.1.0-beta.1").unwrap();
+            bump_major_minor_patch(&mut v, BumpSpec::Major);
+            assert_eq!(v, Version::parse("2.0.0").unwrap());
+        }
+
+        #[test]
+        fn patch_on_stable_increments_patch() {
+            let mut v = Version::parse("1.0.0").unwrap();
+            bump_major_minor_patch(&mut v, BumpSpec::Patch);
+            assert_eq!(v, Version::parse("1.0.1").unwrap());
+        }
+    }
+
+    mod rhs_is_breaking {
+        use super::*;
+
+        #[test]
+        fn same_pre_release_series_not_breaking() {
+            let lhs = Version::parse("1.1.0-beta.1").unwrap();
+            let rhs = Version::parse("1.1.0-beta.2").unwrap();
+            assert!(!rhs_is_breaking_bump_for_lhs(&lhs, &rhs));
+        }
+
+        #[test]
+        fn different_base_in_pre_release_is_breaking() {
+            let lhs = Version::parse("1.1.0-beta.1").unwrap();
+            let rhs = Version::parse("1.2.0-beta.1").unwrap();
+            assert!(rhs_is_breaking_bump_for_lhs(&lhs, &rhs));
+        }
+
+        #[test]
+        fn graduation_same_base_not_breaking() {
+            let lhs = Version::parse("1.1.0-beta.1").unwrap();
+            let rhs = Version::parse("1.1.0").unwrap();
+            assert!(!rhs_is_breaking_bump_for_lhs(&lhs, &rhs));
+        }
+
+        #[test]
+        fn graduation_higher_minor_is_breaking() {
+            let lhs = Version::parse("1.0.0-beta.1").unwrap();
+            let rhs = Version::parse("1.1.0").unwrap();
+            assert!(rhs_is_breaking_bump_for_lhs(&lhs, &rhs));
+        }
+
+        #[test]
+        fn stable_minor_bump_is_breaking() {
+            let lhs = Version::parse("1.0.0").unwrap();
+            let rhs = Version::parse("1.1.0").unwrap();
+            assert!(rhs_is_breaking_bump_for_lhs(&lhs, &rhs));
+        }
+
+        #[test]
+        fn stable_patch_bump_not_breaking() {
+            let lhs = Version::parse("1.0.0").unwrap();
+            let rhs = Version::parse("1.0.1").unwrap();
+            assert!(!rhs_is_breaking_bump_for_lhs(&lhs, &rhs));
+        }
+    }
+
+    mod extract_label {
+        use super::*;
+
+        #[test]
+        fn extracts_beta_from_beta_2() {
+            let v = Version::parse("1.0.0-beta.2").unwrap();
+            assert_eq!(extract_pre_label(&v), "beta");
+        }
+
+        #[test]
+        fn extracts_rc_from_rc_1() {
+            let v = Version::parse("1.0.0-rc.1").unwrap();
+            assert_eq!(extract_pre_label(&v), "rc");
+        }
+
+        #[test]
+        fn returns_whole_pre_without_numeric() {
+            let v = Version::parse("1.0.0-beta").unwrap();
+            assert_eq!(extract_pre_label(&v), "beta");
+        }
+
+        #[test]
+        fn handles_dotted_label() {
+            let v = Version::parse("1.0.0-pre.beta.3").unwrap();
+            assert_eq!(extract_pre_label(&v), "pre.beta");
+        }
+    }
+}
