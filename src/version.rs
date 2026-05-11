@@ -3,13 +3,15 @@ use semver::{Prerelease, Version};
 
 use crate::Context;
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub enum BumpSpec {
     Auto,
     Keep,
     Patch,
     Minor,
     Major,
+    /// Bump or create a pre-release with the given label (e.g. "beta", "alpha", "rc").
+    PreRelease(String),
 }
 
 impl std::fmt::Display for BumpSpec {
@@ -20,6 +22,7 @@ impl std::fmt::Display for BumpSpec {
             BumpSpec::Patch => "patch",
             BumpSpec::Minor => "minor",
             BumpSpec::Major => "major",
+            BumpSpec::PreRelease(label) => return write!(f, "pre:{label}"),
         })
     }
 }
@@ -27,9 +30,9 @@ impl std::fmt::Display for BumpSpec {
 #[allow(clippy::ptr_arg)]
 pub(crate) fn select_publishee_bump_spec(name: &String, ctx: &Context) -> BumpSpec {
     if ctx.crate_names.contains(name) {
-        ctx.bump
+        ctx.bump.clone()
     } else {
-        ctx.bump_dependencies
+        ctx.bump_dependencies.clone()
     }
 }
 
@@ -38,24 +41,38 @@ fn bump_major_minor_patch(v: &mut semver::Version, bump_spec: BumpSpec) -> bool 
     use BumpSpec::*;
     match bump_spec {
         Major => {
-            v.major += 1;
-            v.minor = 0;
-            v.patch = 0;
-            v.pre = Prerelease::EMPTY;
+            if !v.pre.is_empty() && v.minor == 0 && v.patch == 0 {
+                // Graduate: e.g. 2.0.0-beta.1 → 2.0.0
+                v.pre = Prerelease::EMPTY;
+            } else {
+                v.major += 1;
+                v.minor = 0;
+                v.patch = 0;
+                v.pre = Prerelease::EMPTY;
+            }
             true
         }
         Minor => {
-            v.minor += 1;
-            v.patch = 0;
-            v.pre = Prerelease::EMPTY;
+            if !v.pre.is_empty() && v.patch == 0 {
+                // Graduate: e.g. 1.1.0-beta.1 → 1.1.0
+                v.pre = Prerelease::EMPTY;
+            } else {
+                v.minor += 1;
+                v.patch = 0;
+                v.pre = Prerelease::EMPTY;
+            }
             is_pre_release(v)
         }
         Patch => {
-            v.patch += 1;
-            v.pre = Prerelease::EMPTY;
+            if !v.pre.is_empty() {
+                // Graduate: e.g. 1.0.1-beta.1 → 1.0.1 or 1.0.0-beta.1 → 1.0.0
+                v.pre = Prerelease::EMPTY;
+            } else {
+                v.patch += 1;
+            }
             false
         }
-        Keep | Auto => unreachable!("BUG: auto mode or keep are unsupported"),
+        Keep | Auto | PreRelease(_) => unreachable!("BUG: auto mode, keep, or pre-release are unsupported here"),
     }
 }
 
@@ -89,6 +106,10 @@ pub(crate) fn bump_package_with_spec(
     use BumpSpec::*;
     let package_version_must_be_breaking = match bump_spec {
         Major | Minor | Patch => bump_major_minor_patch(&mut v, bump_spec),
+        PreRelease(ref label) => {
+            bump_pre_release(&mut v, label);
+            false
+        }
         Keep => false,
         Auto => {
             use anyhow::Context;
@@ -107,6 +128,11 @@ pub(crate) fn bump_package_with_spec(
             );
             let unreleased = &segments[0];
             if unreleased.history.is_empty() {
+                false
+            } else if !v.pre.is_empty() {
+                // In a pre-release series: always increment the pre-release number
+                let label = extract_pre_label(&v);
+                bump_pre_release(&mut v, &label);
                 false
             } else if unreleased.history.iter().any(|item| item.message.breaking) {
                 let is_breaking = if is_pre_release(&v) {
@@ -179,6 +205,48 @@ pub(crate) fn is_pre_release(semver: &Version) -> bool {
     crate::utils::is_pre_release_version(semver)
 }
 
+/// Extract the label portion of a pre-release identifier (e.g. "beta" from "beta.2").
+pub(crate) fn extract_pre_label(v: &Version) -> String {
+    let pre = v.pre.as_str();
+    match pre.rsplit_once('.') {
+        Some((label, numeric)) if numeric.parse::<u64>().is_ok() => label.to_owned(),
+        _ => pre.to_owned(),
+    }
+}
+
+/// Bump the pre-release portion of `v` using `label`.
+/// - If `v.pre` is empty, apply a minor bump first, then set pre to `{label}.1`.
+/// - If `v.pre` starts with the same label, increment the numeric suffix.
+/// - If `v.pre` has a different label, replace with `{label}.1`.
+fn bump_pre_release(v: &mut semver::Version, label: &str) {
+    if v.pre.is_empty() {
+        v.minor += 1;
+        v.patch = 0;
+        v.pre = Prerelease::new(&format!("{label}.1")).expect("valid prerelease");
+    } else {
+        let pre = v.pre.as_str();
+        match pre.rsplit_once('.') {
+            Some((existing_label, numeric)) if numeric.parse::<u64>().is_ok() => {
+                if existing_label == label {
+                    let n: u64 = numeric.parse().unwrap();
+                    v.pre = Prerelease::new(&format!("{label}.{}", n + 1)).expect("valid prerelease");
+                } else {
+                    v.pre = Prerelease::new(&format!("{label}.1")).expect("valid prerelease");
+                }
+            }
+            _ => {
+                // No numeric suffix, start at 1
+                v.pre = Prerelease::new(&format!("{label}.1")).expect("valid prerelease");
+            }
+        }
+    }
+}
+
 pub(crate) fn rhs_is_breaking_bump_for_lhs(lhs: &Version, rhs: &Version) -> bool {
-    rhs.major > lhs.major || rhs.minor > lhs.minor
+    if !lhs.pre.is_empty() && !rhs.pre.is_empty() {
+        // Different base version is breaking within pre-release
+        rhs.major > lhs.major || rhs.minor > lhs.minor || rhs.patch > lhs.patch
+    } else {
+        rhs.major > lhs.major || rhs.minor > lhs.minor
+    }
 }
