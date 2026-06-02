@@ -472,7 +472,7 @@ impl EditForPublish {
 
 fn breaking_version_bump(ctx: &Context, package: &Package, bump_when_needed: bool) -> anyhow::Result<Bump> {
     let breaking_spec = if !package.version.pre.is_empty() {
-        BumpSpec::PreRelease(version::extract_pre_label(&package.version))
+        BumpSpec::PreRelease
     } else if is_pre_release_version(&package.version) {
         BumpSpec::Minor
     } else {

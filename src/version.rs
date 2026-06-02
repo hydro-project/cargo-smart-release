@@ -10,8 +10,8 @@ pub enum BumpSpec {
     Patch,
     Minor,
     Major,
-    /// Bump or create a pre-release with the given label (e.g. "beta", "alpha", "rc").
-    PreRelease(String),
+    /// Increment existing pre-release counter. Errors if not already a pre-release.
+    PreRelease,
 }
 
 impl std::fmt::Display for BumpSpec {
@@ -22,7 +22,7 @@ impl std::fmt::Display for BumpSpec {
             BumpSpec::Patch => "patch",
             BumpSpec::Minor => "minor",
             BumpSpec::Major => "major",
-            BumpSpec::PreRelease(label) => return write!(f, "pre:{label}"),
+            BumpSpec::PreRelease => "prerelease",
         })
     }
 }
@@ -72,7 +72,7 @@ fn bump_major_minor_patch(v: &mut semver::Version, bump_spec: BumpSpec) -> bool 
             }
             false
         }
-        Keep | Auto | PreRelease(_) => unreachable!("BUG: auto mode, keep, or pre-release are unsupported here"),
+        Keep | Auto | PreRelease => unreachable!("BUG: auto mode, keep, or pre-release are unsupported here"),
     }
 }
 
@@ -106,8 +106,13 @@ pub(crate) fn bump_package_with_spec(
     use BumpSpec::*;
     let package_version_must_be_breaking = match bump_spec {
         Major | Minor | Patch => bump_major_minor_patch(&mut v, bump_spec),
-        PreRelease(ref label) => {
-            bump_pre_release(&mut v, label);
+        PreRelease => {
+            let label = if ctx.pre_id.is_empty() {
+                extract_pre_label(&v)
+            } else {
+                ctx.pre_id.clone()
+            };
+            bump_pre_release(&mut v, &label);
             false
         }
         Keep => false,
