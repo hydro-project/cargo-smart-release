@@ -584,7 +584,10 @@ fn set_version_and_update_package_dependency(
                         && version::is_pre_release(new_version) // setting the lower bound unnecessarily can be harmful
                         // don't claim to be conservative if this is necessary anyway
                         && req_as_version(&version_req).is_some_and(|req_version| !version::rhs_is_breaking_bump_for_lhs(&req_version, new_version));
-                    if !version_req.matches(new_version) || force_update {
+                    // Cargo's semver matching is strict for pre-release: ^1.0.0-beta.1 does NOT
+                    // match 1.0.0-beta.2, so always update when the new version has a pre-release.
+                    let force_pre_release_update = !new_version.pre.is_empty();
+                    if !version_req.matches(new_version) || force_update || force_pre_release_update {
                         if !version_req_unset_or_default(&version_req) {
                             bail!(
                                 "{} has it's {} dependency set to a version requirement with comparator {} - cannot currently handle that.",
@@ -598,7 +601,13 @@ fn set_version_and_update_package_dependency(
                             log::trace!(
                                 "Pending '{}' {}manifest {} update: '{} = \"{}\"' (from {})",
                                 package_to_update.name,
-                                if force_update { "conservative " } else { "" },
+                                if force_update {
+                                    "conservative "
+                                } else if force_pre_release_update {
+                                    "pre-release "
+                                } else {
+                                    ""
+                                },
                                 dep_type,
                                 name_to_find,
                                 new_version,
