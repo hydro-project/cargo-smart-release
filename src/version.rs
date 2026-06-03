@@ -131,12 +131,27 @@ pub(crate) fn bump_package_with_spec(
             }
         }
         PreRelease => {
+            if v.pre.is_empty() {
+                anyhow::bail!(
+                    "Cannot use 'prerelease' on stable version {}. \
+                     Use '--bump major/minor/patch --pre-id <label>' to start a pre-release series.",
+                    v
+                );
+            }
+            let existing_label = extract_pre_label(&v);
             let label = if ctx.pre_id.is_empty() {
-                extract_pre_label(&v)
+                existing_label.clone()
             } else {
                 ctx.pre_id.clone()
             };
-            bump_pre_release(&mut v, &label);
+            if label == existing_label {
+                // Same label: increment counter
+                let n = extract_pre_number(&v);
+                v.pre = Prerelease::new(&format!("{label}.{}", n + 1)).expect("valid prerelease");
+            } else {
+                // Different label: replace, reset to 0
+                v.pre = Prerelease::new(&format!("{label}.0")).expect("valid prerelease");
+            }
             false
         }
         Keep => false,
@@ -240,6 +255,16 @@ pub(crate) fn extract_pre_label(v: &Version) -> String {
     match pre.rsplit_once('.') {
         Some((label, numeric)) if numeric.parse::<u64>().is_ok() => label.to_owned(),
         _ => pre.to_owned(),
+    }
+}
+
+/// Extract the numeric suffix of a pre-release identifier (e.g. 2 from "beta.2").
+/// Returns 0 if there is no numeric suffix.
+fn extract_pre_number(v: &Version) -> u64 {
+    let pre = v.pre.as_str();
+    match pre.rsplit_once('.') {
+        Some((_, numeric)) => numeric.parse::<u64>().unwrap_or(0),
+        _ => 0,
     }
 }
 
@@ -515,6 +540,28 @@ mod tests {
         fn handles_dotted_label() {
             let v = Version::parse("1.0.0-pre.beta.3").unwrap();
             assert_eq!(extract_pre_label(&v), "pre.beta");
+        }
+    }
+
+    mod extract_number {
+        use super::*;
+
+        #[test]
+        fn extracts_number() {
+            let v = Version::parse("1.0.0-beta.2").unwrap();
+            assert_eq!(extract_pre_number(&v), 2);
+        }
+
+        #[test]
+        fn returns_zero_without_numeric() {
+            let v = Version::parse("1.0.0-beta").unwrap();
+            assert_eq!(extract_pre_number(&v), 0);
+        }
+
+        #[test]
+        fn extracts_from_dotted_label() {
+            let v = Version::parse("1.0.0-pre.beta.5").unwrap();
+            assert_eq!(extract_pre_number(&v), 5);
         }
     }
 }
