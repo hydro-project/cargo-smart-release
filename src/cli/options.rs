@@ -35,23 +35,36 @@ pub enum SubCommands {
 
         /// Specify the kind of version bump you seek for the crate and potentially it's dependencies.
         ///
-        /// Can be 'major', 'minor' or 'patch', 'keep' and 'auto'.
+        /// Can be 'major', 'minor', 'patch', 'keep', 'auto', or 'prerelease'.
         /// With 'keep', the current version will be kept, useful if versions are specified by hand in the manifest.
+        /// With 'prerelease', the pre-release counter is incremented (errors if not already a pre-release).
+        /// When --pre-id is set, 'major'/'minor'/'patch' produce a pre-release at that level, and 'auto'
+        /// computes the level from commit history since the last stable release.
         ///
-        /// The default is 'auto', which derives the necessary information from the git commit history and occasional
+        /// The default is 'auto', which derives the necessary information from the git commit history and
         /// conventional messages.
         #[clap(long, short = 'b', help_heading = Some("MAJOR"))]
         bump: Option<String>,
 
         /// Specify the kind of version bump to apply to dependencies only.
         ///
-        /// Can be 'major', 'minor' or 'patch', 'keep' and 'auto'.
-        /// With 'keep', the current version will be kept, useful if versions are specified by hand in the manifest.
+        /// Can be 'major', 'minor', 'patch', 'keep', 'auto', or 'prerelease'.
         ///
-        /// The default is 'auto', which derives the necessary information from the git commit history and occasional
+        /// The default is 'auto', which derives the necessary information from the git commit history and
         /// conventional messages.
         #[clap(long, short = 'd', help_heading = Some("MAJOR"))]
         bump_dependencies: Option<String>,
+
+        /// Pre-release identifier label (e.g. "beta", "alpha", "rc").
+        ///
+        /// When set, modifies the behavior of --bump:
+        /// - With 'major'/'minor'/'patch': produces a pre-release at that level (e.g. --bump major --pre-id beta → 2.0.0-beta.0)
+        /// - With 'auto': computes the bump level from commits since the last stable release and outputs a pre-release
+        /// - With 'prerelease': changes the label (resetting the counter if different from current)
+        ///
+        /// Without --pre-id, 'major'/'minor'/'patch' produce stable versions and 'auto' behaves normally.
+        #[clap(long, help_heading = Some("MAJOR"))]
+        pre_id: Option<String>,
 
         /// The name of the crates to be released, along with all of their dependencies if needed.
         ///

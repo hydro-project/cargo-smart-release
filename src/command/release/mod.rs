@@ -33,8 +33,9 @@ impl Context {
         bump_dependencies: BumpSpec,
         changelog: bool,
         changelog_links: bool,
+        pre_id: String,
     ) -> anyhow::Result<Self> {
-        let base = crate::Context::new(crate_names, changelog, bump, bump_dependencies)?;
+        let base = crate::Context::new(crate_names, changelog, bump, bump_dependencies, pre_id)?;
         let changelog_links = if changelog_links {
             crate::git::remote_url(&base.repo)?.map_or(Linkables::AsText, |url| Linkables::AsLinks {
                 repository_url: url.into(),
@@ -48,7 +49,13 @@ impl Context {
 
 /// In order to try dealing with <https://github.com/sunng87/cargo-release/issues/224> and also to make workspace
 /// releases more selective.
-pub fn release(opts: Options, crates: Vec<String>, bump: BumpSpec, bump_dependencies: BumpSpec) -> anyhow::Result<()> {
+pub fn release(
+    opts: Options,
+    crates: Vec<String>,
+    bump: BumpSpec,
+    bump_dependencies: BumpSpec,
+    pre_id: String,
+) -> anyhow::Result<()> {
     if opts.dry_run_cargo_publish && !opts.dry_run {
         bail!("The --no-dry-run-cargo-publish flag is only effective without --execute")
     }
@@ -59,7 +66,14 @@ pub fn release(opts: Options, crates: Vec<String>, bump: BumpSpec, bump_dependen
         opts.changelog
     };
 
-    let ctx = Context::new(crates, bump, bump_dependencies, allow_changelog, opts.changelog_links)?;
+    let ctx = Context::new(
+        crates,
+        bump,
+        bump_dependencies,
+        allow_changelog,
+        opts.changelog_links,
+        pre_id,
+    )?;
     if should_update_crates_index(&opts) {
         log::info!("Updating crates-io index",);
         ctx.base.crates_index.update();

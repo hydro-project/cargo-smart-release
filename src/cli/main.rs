@@ -41,6 +41,7 @@ fn main() -> anyhow::Result<()> {
             verbose,
             bump,
             bump_dependencies,
+            pre_id,
             crates,
             allow_dirty,
             ignore_instability,
@@ -105,6 +106,7 @@ fn main() -> anyhow::Result<()> {
                 crates,
                 to_bump_spec(bump.as_deref().unwrap_or(DEFAULT_BUMP_SPEC))?,
                 to_bump_spec(bump_dependencies.as_deref().unwrap_or(DEFAULT_BUMP_SPEC))?,
+                pre_id.unwrap_or_default(),
             )?
         }
     };
@@ -122,6 +124,7 @@ fn to_bump_spec(spec: &str) -> anyhow::Result<cargo_smart_release::version::Bump
         "major" | "Major" => Major,
         "keep" | "Keep" => Keep,
         "auto" | "Auto" => Auto,
+        "prerelease" => PreRelease,
         unknown_spec => anyhow::bail!("Unknown bump specification: {:?}", unknown_spec),
     })
 }

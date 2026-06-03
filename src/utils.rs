@@ -45,7 +45,7 @@ pub fn try_to_published_crate_and_new_version<'meta, 'a>(
 }
 
 pub fn is_pre_release_version(semver: &Version) -> bool {
-    semver.major == 0
+    semver.major == 0 || !semver.pre.is_empty()
 }
 
 pub fn is_top_level_package(manifest_path: &Utf8Path, repo: &gix::Repository) -> bool {
@@ -162,6 +162,33 @@ pub fn time_to_zoned_time(time: gix::date::Time) -> anyhow::Result<jiff::Zoned> 
 
 #[cfg(test)]
 mod tests {
+    mod is_pre_release_version_fn {
+        use semver::Version;
+
+        use crate::utils::is_pre_release_version;
+
+        #[test]
+        fn zero_major_is_pre_release() {
+            assert!(is_pre_release_version(&Version::parse("0.1.0").unwrap()));
+        }
+
+        #[test]
+        fn stable_is_not_pre_release() {
+            assert!(!is_pre_release_version(&Version::parse("1.0.0").unwrap()));
+        }
+
+        #[test]
+        fn semver_pre_release_identifier_is_pre_release() {
+            assert!(is_pre_release_version(&Version::parse("1.0.0-beta.1").unwrap()));
+            assert!(is_pre_release_version(&Version::parse("2.0.0-rc.1").unwrap()));
+        }
+
+        #[test]
+        fn zero_major_with_pre_identifier() {
+            assert!(is_pre_release_version(&Version::parse("0.1.0-alpha.1").unwrap()));
+        }
+    }
+
     mod parse_possibly_prefixed_tag_version {
         mod matches {
             use std::str::FromStr;
