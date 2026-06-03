@@ -212,8 +212,8 @@ fn present_and_validate_dependencies(
     let mut error = false;
     for dep in crates {
         let (bump_spec, kind) = match dep.kind {
-            Kind::UserSelection => (ctx.base.bump.clone(), "provided"),
-            Kind::DependencyOrDependentOfUserSelection => (ctx.base.bump_dependencies.clone(), "dependent"),
+            Kind::UserSelection => (ctx.base.bump, "provided"),
+            Kind::DependencyOrDependentOfUserSelection => (ctx.base.bump_dependencies, "dependent"),
         };
         match &dep.mode {
             dependency::Mode::ToBePublished { adjustment } => {

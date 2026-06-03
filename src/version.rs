@@ -3,7 +3,7 @@ use semver::{Prerelease, Version};
 
 use crate::Context;
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum BumpSpec {
     Auto,
     Keep,
@@ -30,9 +30,9 @@ impl std::fmt::Display for BumpSpec {
 #[allow(clippy::ptr_arg)]
 pub(crate) fn select_publishee_bump_spec(name: &String, ctx: &Context) -> BumpSpec {
     if ctx.crate_names.contains(name) {
-        ctx.bump.clone()
+        ctx.bump
     } else {
-        ctx.bump_dependencies.clone()
+        ctx.bump_dependencies
     }
 }
 
