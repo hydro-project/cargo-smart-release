@@ -105,7 +105,31 @@ pub(crate) fn bump_package_with_spec(
     let mut v = package.version.clone();
     use BumpSpec::*;
     let package_version_must_be_breaking = match bump_spec {
-        Major | Minor | Patch => bump_major_minor_patch(&mut v, bump_spec),
+        Major | Minor | Patch => {
+            if ctx.pre_id.is_empty() {
+                bump_major_minor_patch(&mut v, bump_spec)
+            } else {
+                // With --pre-id, always bump the base and set pre-release (npm premajor/preminor/prepatch)
+                match bump_spec {
+                    Major => {
+                        v.major += 1;
+                        v.minor = 0;
+                        v.patch = 0;
+                    }
+                    Minor => {
+                        v.minor += 1;
+                        v.patch = 0;
+                    }
+                    Patch => {
+                        v.patch += 1;
+                    }
+                    _ => unreachable!(),
+                }
+                v.pre = Prerelease::new(&format!("{}.0", ctx.pre_id)).expect("valid prerelease");
+                // Pre-releases are not considered breaking in the same way
+                false
+            }
+        }
         PreRelease => {
             let label = if ctx.pre_id.is_empty() {
                 extract_pre_label(&v)
@@ -397,6 +421,72 @@ mod tests {
             let lhs = Version::parse("1.0.0").unwrap();
             let rhs = Version::parse("1.0.1").unwrap();
             assert!(!rhs_is_breaking_bump_for_lhs(&lhs, &rhs));
+        }
+    }
+
+    mod pre_id_modifier {
+        use super::*;
+
+        /// Helper to simulate --pre-id modifier on major/minor/patch
+        fn bump_with_pre_id(v: &mut Version, bump_spec: BumpSpec, pre_id: &str) {
+            match bump_spec {
+                BumpSpec::Major => {
+                    v.major += 1;
+                    v.minor = 0;
+                    v.patch = 0;
+                }
+                BumpSpec::Minor => {
+                    v.minor += 1;
+                    v.patch = 0;
+                }
+                BumpSpec::Patch => {
+                    v.patch += 1;
+                }
+                _ => unreachable!(),
+            }
+            v.pre = Prerelease::new(&format!("{pre_id}.0")).unwrap();
+        }
+
+        #[test]
+        fn major_from_stable() {
+            let mut v = Version::parse("1.2.3").unwrap();
+            bump_with_pre_id(&mut v, BumpSpec::Major, "beta");
+            assert_eq!(v, Version::parse("2.0.0-beta.0").unwrap());
+        }
+
+        #[test]
+        fn minor_from_stable() {
+            let mut v = Version::parse("1.2.3").unwrap();
+            bump_with_pre_id(&mut v, BumpSpec::Minor, "beta");
+            assert_eq!(v, Version::parse("1.3.0-beta.0").unwrap());
+        }
+
+        #[test]
+        fn patch_from_stable() {
+            let mut v = Version::parse("1.2.3").unwrap();
+            bump_with_pre_id(&mut v, BumpSpec::Patch, "beta");
+            assert_eq!(v, Version::parse("1.2.4-beta.0").unwrap());
+        }
+
+        #[test]
+        fn major_from_pre_release() {
+            let mut v = Version::parse("2.0.0-beta.3").unwrap();
+            bump_with_pre_id(&mut v, BumpSpec::Major, "beta");
+            assert_eq!(v, Version::parse("3.0.0-beta.0").unwrap());
+        }
+
+        #[test]
+        fn minor_from_pre_release() {
+            let mut v = Version::parse("1.3.0-beta.2").unwrap();
+            bump_with_pre_id(&mut v, BumpSpec::Minor, "beta");
+            assert_eq!(v, Version::parse("1.4.0-beta.0").unwrap());
+        }
+
+        #[test]
+        fn patch_from_pre_release() {
+            let mut v = Version::parse("1.2.4-beta.1").unwrap();
+            bump_with_pre_id(&mut v, BumpSpec::Patch, "rc");
+            assert_eq!(v, Version::parse("1.2.5-rc.0").unwrap());
         }
     }
 
