@@ -157,47 +157,105 @@ pub(crate) fn bump_package_with_spec(
         Keep => false,
         Auto => {
             use anyhow::Context;
-            let segments = crate::git::history::crate_ref_segments(
-                package,
-                ctx,
-                ctx.history
-                    .as_ref()
-                    .context("Did not have access to the Git history - please assure to not be on a detached HEAD")?,
-                crate::git::history::SegmentScope::Unreleased,
-            )?;
-            assert_eq!(
-                segments.len(),
-                1,
-                "there should be exactly one section, the 'unreleased' one"
-            );
-            let unreleased = &segments[0];
-            if unreleased.history.is_empty() {
-                false
-            } else if !v.pre.is_empty() {
-                // In a pre-release series: always increment the pre-release number
-                let label = extract_pre_label(&v);
-                bump_pre_release(&mut v, &label);
-                false
-            } else if unreleased.history.iter().any(|item| item.message.breaking) {
-                let is_breaking = if is_pre_release(&v) {
-                    bump_major_minor_patch(&mut v, Minor)
+            let history_ref = ctx
+                .history
+                .as_ref()
+                .context("Did not have access to the Git history - please assure to not be on a detached HEAD")?;
+
+            if !ctx.pre_id.is_empty() {
+                // Auto + pre-id: compute base from commits since last stable release
+                let segments = crate::git::history::crate_ref_segments(
+                    package,
+                    ctx,
+                    history_ref,
+                    crate::git::history::SegmentScope::UnreleasedSinceStable,
+                )?;
+                assert!(
+                    !segments.is_empty(),
+                    "there should be at least one section when using UnreleasedSinceStable"
+                );
+                let all_commits = &segments[0];
+                if all_commits.history.is_empty() {
+                    false
                 } else {
-                    bump_major_minor_patch(&mut v, Major)
-                };
-                assert!(is_breaking, "BUG: breaking changes are…breaking :D");
-                is_breaking
-            } else if unreleased.history.iter().any(|item| item.message.kind == Some("feat")) {
-                let is_breaking = if is_pre_release(&v) {
-                    bump_major_minor_patch(&mut v, Patch)
-                } else {
-                    bump_major_minor_patch(&mut v, Minor)
-                };
-                assert!(!is_breaking, "BUG: new features are never breaking");
-                is_breaking
+                    let label = &ctx.pre_id;
+
+                    // Determine target base from commit history severity
+                    let base_level = if all_commits.history.iter().any(|item| item.message.breaking) {
+                        Major
+                    } else if all_commits.history.iter().any(|item| item.message.kind == Some("feat")) {
+                        Minor
+                    } else {
+                        Patch
+                    };
+
+                    // Compute target base from last stable version
+                    let last_stable = find_last_stable_version(package, ctx);
+                    let mut target_base = last_stable.clone();
+                    bump_major_minor_patch(&mut target_base, base_level);
+
+                    if v.major == target_base.major && v.minor == target_base.minor && v.patch == target_base.patch {
+                        // Base already correct — increment counter
+                        let existing_label = extract_pre_label(&v);
+                        if !v.pre.is_empty() && existing_label == *label {
+                            let n = extract_pre_number(&v);
+                            v.pre = Prerelease::new(&format!("{label}.{}", n + 1)).expect("valid prerelease");
+                        } else {
+                            v.major = target_base.major;
+                            v.minor = target_base.minor;
+                            v.patch = target_base.patch;
+                            v.pre = Prerelease::new(&format!("{label}.0")).expect("valid prerelease");
+                        }
+                    } else {
+                        // Escalate base, reset counter
+                        v.major = target_base.major;
+                        v.minor = target_base.minor;
+                        v.patch = target_base.patch;
+                        v.pre = Prerelease::new(&format!("{label}.0")).expect("valid prerelease");
+                    }
+                    false
+                }
             } else {
-                let is_breaking = bump_major_minor_patch(&mut v, Patch);
-                assert!(!is_breaking, "BUG: patch releases are never breaking");
-                false
+                // Standard auto mode: compute from commits since last tag
+                let segments = crate::git::history::crate_ref_segments(
+                    package,
+                    ctx,
+                    history_ref,
+                    crate::git::history::SegmentScope::Unreleased,
+                )?;
+                assert_eq!(
+                    segments.len(),
+                    1,
+                    "there should be exactly one section, the 'unreleased' one"
+                );
+                let unreleased = &segments[0];
+                if unreleased.history.is_empty() {
+                    false
+                } else if !v.pre.is_empty() {
+                    // Already in a pre-release without --pre-id: graduate to stable
+                    v.pre = Prerelease::EMPTY;
+                    false
+                } else if unreleased.history.iter().any(|item| item.message.breaking) {
+                    let is_breaking = if is_pre_release(&v) {
+                        bump_major_minor_patch(&mut v, Minor)
+                    } else {
+                        bump_major_minor_patch(&mut v, Major)
+                    };
+                    assert!(is_breaking, "BUG: breaking changes are…breaking :D");
+                    is_breaking
+                } else if unreleased.history.iter().any(|item| item.message.kind == Some("feat")) {
+                    let is_breaking = if is_pre_release(&v) {
+                        bump_major_minor_patch(&mut v, Patch)
+                    } else {
+                        bump_major_minor_patch(&mut v, Minor)
+                    };
+                    assert!(!is_breaking, "BUG: new features are never breaking");
+                    is_breaking
+                } else {
+                    let is_breaking = bump_major_minor_patch(&mut v, Patch);
+                    assert!(!is_breaking, "BUG: patch releases are never breaking");
+                    false
+                }
             }
         }
     };
@@ -245,6 +303,39 @@ pub(crate) fn bump_package(package: &Package, ctx: &Context, bump_when_needed: b
     bump_package_with_spec(package, bump_spec, ctx, bump_when_needed)
 }
 
+/// Find the last stable (non-pre-release) version for a package.
+/// Checks the crates index first, falls back to stripping pre from current version,
+/// or 0.0.0 if no stable version exists.
+fn find_last_stable_version(package: &Package, ctx: &Context) -> Version {
+    if let Some(published_crate) = ctx.crates_index.crate_(&package.name) {
+        // Find highest version without a pre-release identifier
+        let stable = published_crate
+            .versions()
+            .iter()
+            .filter_map(|v| semver::Version::parse(v.version()).ok())
+            .filter(|v| v.pre.is_empty())
+            .max();
+        if let Some(v) = stable {
+            return v;
+        }
+    }
+    // Fallback: if current version has a pre, strip it; otherwise use it as-is
+    let mut fallback = package.version.clone();
+    if !fallback.pre.is_empty() {
+        fallback.pre = Prerelease::EMPTY;
+        // The base was already bumped when entering pre-release, so "un-bump" by using
+        // a zero version if this is truly the first release
+        if fallback.major == 0 && fallback.minor == 0 && fallback.patch == 0 {
+            return fallback;
+        }
+        // Can't reliably un-bump, so use the current base as the floor
+        // This means the first auto --pre-id on an already-pre version may not escalate correctly
+        // but it's the best we can do without published history
+        return fallback;
+    }
+    fallback
+}
+
 pub(crate) fn is_pre_release(semver: &Version) -> bool {
     crate::utils::is_pre_release_version(semver)
 }
@@ -268,34 +359,6 @@ fn extract_pre_number(v: &Version) -> u64 {
     }
 }
 
-/// Bump the pre-release portion of `v` using `label`.
-/// - If `v.pre` is empty, apply a minor bump first, then set pre to `{label}.1`.
-/// - If `v.pre` starts with the same label, increment the numeric suffix.
-/// - If `v.pre` has a different label, replace with `{label}.1`.
-fn bump_pre_release(v: &mut semver::Version, label: &str) {
-    if v.pre.is_empty() {
-        v.minor += 1;
-        v.patch = 0;
-        v.pre = Prerelease::new(&format!("{label}.1")).expect("valid prerelease");
-    } else {
-        let pre = v.pre.as_str();
-        match pre.rsplit_once('.') {
-            Some((existing_label, numeric)) if numeric.parse::<u64>().is_ok() => {
-                if existing_label == label {
-                    let n: u64 = numeric.parse().unwrap();
-                    v.pre = Prerelease::new(&format!("{label}.{}", n + 1)).expect("valid prerelease");
-                } else {
-                    v.pre = Prerelease::new(&format!("{label}.1")).expect("valid prerelease");
-                }
-            }
-            _ => {
-                // No numeric suffix, start at 1
-                v.pre = Prerelease::new(&format!("{label}.1")).expect("valid prerelease");
-            }
-        }
-    }
-}
-
 pub(crate) fn rhs_is_breaking_bump_for_lhs(lhs: &Version, rhs: &Version) -> bool {
     if !lhs.pre.is_empty() && !rhs.pre.is_empty() {
         // Different base version is breaking within pre-release
@@ -310,45 +373,6 @@ mod tests {
     use semver::Version;
 
     use super::*;
-
-    mod bump_pre_release_fn {
-        use super::*;
-
-        #[test]
-        fn from_stable_creates_new_pre_release() {
-            let mut v = Version::parse("1.0.0").unwrap();
-            bump_pre_release(&mut v, "beta");
-            assert_eq!(v, Version::parse("1.1.0-beta.1").unwrap());
-        }
-
-        #[test]
-        fn increments_same_label() {
-            let mut v = Version::parse("1.1.0-beta.1").unwrap();
-            bump_pre_release(&mut v, "beta");
-            assert_eq!(v, Version::parse("1.1.0-beta.2").unwrap());
-        }
-
-        #[test]
-        fn changes_label_resets_counter() {
-            let mut v = Version::parse("1.1.0-beta.3").unwrap();
-            bump_pre_release(&mut v, "rc");
-            assert_eq!(v, Version::parse("1.1.0-rc.1").unwrap());
-        }
-
-        #[test]
-        fn from_zero_x_stable() {
-            let mut v = Version::parse("0.5.0").unwrap();
-            bump_pre_release(&mut v, "alpha");
-            assert_eq!(v, Version::parse("0.6.0-alpha.1").unwrap());
-        }
-
-        #[test]
-        fn pre_without_numeric_suffix() {
-            let mut v = Version::parse("1.0.0-beta").unwrap();
-            bump_pre_release(&mut v, "beta");
-            assert_eq!(v, Version::parse("1.0.0-beta.1").unwrap());
-        }
-    }
 
     mod graduation {
         use super::*;
