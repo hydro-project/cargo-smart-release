@@ -17,13 +17,16 @@ use crate::{
     commit,
     commit::history::{Item, Segment},
     git::strip_tag_path,
-    utils::{component_to_bytes, is_tag_name, is_tag_version, tag_prefix},
+    utils::{component_to_bytes, is_tag_name, is_tag_version, parse_possibly_prefixed_tag_version, tag_prefix},
     Context,
 };
 
 pub enum SegmentScope {
     /// Stop finding segments after the unreleased/first section was processed.
     Unreleased,
+    /// Stop after finding the first stable (non-pre-release) tag, accumulating
+    /// all commits including those past pre-release tags.
+    UnreleasedSinceStable,
     /// Obtain all segments, including unreleased and tags
     EntireHistory,
 }
@@ -188,6 +191,27 @@ pub fn crate_ref_segments<'h>(
                     SegmentScope::Unreleased => {
                         segments.push(segment);
                         return Ok(segments);
+                    }
+                    SegmentScope::UnreleasedSinceStable => {
+                        let tag_version = parse_possibly_prefixed_tag_version(
+                            tag_prefix.as_deref(),
+                            strip_tag_path(next_ref.name.as_ref()),
+                        );
+                        if tag_version.map_or(false, |v| !v.pre.is_empty()) {
+                            // Pre-release tag — keep accumulating commits
+                            add_item_if_package_changed(
+                                ctx,
+                                &mut segment,
+                                &mut filter,
+                                item,
+                                &history.data_by_tree_id,
+                            )?;
+                            continue;
+                        } else {
+                            // Stable tag — stop here
+                            segments.push(segment);
+                            return Ok(segments);
+                        }
                     }
                 }
                 add_item_if_package_changed(ctx, &mut segment, &mut filter, item, &history.data_by_tree_id)?
