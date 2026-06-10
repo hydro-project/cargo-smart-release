@@ -257,9 +257,10 @@ fn forward_propagate_breaking_changes_for_manifest_updates<'meta>(
     let mut non_publishing_crates_with_safety_bumps = Vec::new();
     let mut backing = crates
         .iter()
-        .filter(
-            |c| matches!(&c.mode, dependency::Mode::ToBePublished { adjustment } if adjustment.bump().is_breaking()),
-        )
+        .filter(|c| {
+            matches!(&c.mode, dependency::Mode::ToBePublished { adjustment }
+                if adjustment.bump().is_breaking() || adjustment.bump().is_pre_release_incompatible())
+        })
         .map(ToOwned::to_owned)
         .collect::<Vec<_>>();
     let workspace_packages: Vec<_> = ctx
@@ -471,7 +472,9 @@ impl EditForPublish {
 }
 
 fn breaking_version_bump(ctx: &Context, package: &Package, bump_when_needed: bool) -> anyhow::Result<Bump> {
-    let breaking_spec = if is_pre_release_version(&package.version) {
+    let breaking_spec = if !package.version.pre.is_empty() {
+        BumpSpec::PreRelease
+    } else if is_pre_release_version(&package.version) {
         BumpSpec::Minor
     } else {
         BumpSpec::Major
@@ -511,7 +514,7 @@ fn find_safety_bump_edits_backwards_from_crates_for_publish(
             continue;
         }
         match dep.mode.version_adjustment_bump() {
-            Some(dep_bump) if dep_bump.is_breaking() => {
+            Some(dep_bump) if dep_bump.is_breaking() || dep_bump.is_pre_release_incompatible() => {
                 if !edits.iter().any(|e| e.crates_idx == current_idx) {
                     edits.push(EditForPublish::from(current_idx, vec![dep_idx]));
                 }
@@ -641,7 +644,20 @@ fn adjust_workspace_crates_depending_on_adjusted_crates<'meta>(
 
             match crates.iter_mut().find(|c| c.package.id == wsp.id) {
                 Some(existing) => {
-                    changed |= maybe_promote_selected_dependency(existing, ctx, bump_when_needed)?;
+                    let promoted = maybe_promote_selected_dependency(existing, ctx, bump_when_needed)?;
+                    if !promoted {
+                        // Mark an existing unchanged, non-publishing dependent crate for a
+                        // manifest update when one of its workspace dependencies is getting
+                        // a version bump.
+                        if let dependency::Mode::NotForPublishing { adjustment, reason } = &mut existing.mode {
+                            if adjustment.is_none() && *reason == dependency::NoPublishReason::Unchanged {
+                                *adjustment = Some(ManifestAdjustment::DueToDependencyChange);
+                                changed = true;
+                            }
+                        }
+                    } else {
+                        changed = true;
+                    }
                 }
                 None => {
                     crates.push(Dependency {
