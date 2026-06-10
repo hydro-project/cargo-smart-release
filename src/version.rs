@@ -106,6 +106,14 @@ impl Bump {
     pub(crate) fn is_breaking(&self) -> bool {
         rhs_is_breaking_bump_for_lhs(&self.package_version, &self.next_release)
     }
+    /// Returns true if the version bump produces a pre-release that existing caret
+    /// requirements on `package_version` cannot match. This happens when `next_release`
+    /// is pre-release and has a different major.minor.patch base than `package_version`.
+    pub(crate) fn is_pre_release_incompatible(&self) -> bool {
+        let lhs = &self.package_version;
+        let rhs = &self.next_release;
+        !rhs.pre.is_empty() && (lhs.major != rhs.major || lhs.minor != rhs.minor || lhs.patch != rhs.patch)
+    }
 }
 
 pub(crate) fn bump_package_with_spec(
@@ -479,6 +487,61 @@ mod tests {
             let lhs = Version::parse("1.0.0").unwrap();
             let rhs = Version::parse("1.0.1").unwrap();
             assert!(!rhs_is_breaking_bump_for_lhs(&lhs, &rhs));
+        }
+    }
+
+    mod pre_release_incompatible {
+        use super::*;
+
+        fn bump(from: &str, to: &str) -> Bump {
+            Bump {
+                package_version: Version::parse(from).unwrap(),
+                next_release: Version::parse(to).unwrap(),
+                latest_release: None,
+                desired_release: Version::parse(to).unwrap(),
+            }
+        }
+
+        #[test]
+        fn stable_to_pre_release_different_patch() {
+            assert!(bump("0.1.0", "0.1.1-alpha.0").is_pre_release_incompatible());
+        }
+
+        #[test]
+        fn stable_to_pre_release_different_minor() {
+            assert!(bump("1.0.0", "1.1.0-alpha.0").is_pre_release_incompatible());
+        }
+
+        #[test]
+        fn stable_to_pre_release_different_major() {
+            assert!(bump("1.0.0", "2.0.0-alpha.0").is_pre_release_incompatible());
+        }
+
+        #[test]
+        fn pre_to_pre_same_base_is_compatible() {
+            assert!(!bump("1.0.0-beta.0", "1.0.0-beta.1").is_pre_release_incompatible());
+        }
+
+        #[test]
+        fn pre_to_pre_same_base_different_label_is_compatible() {
+            assert!(!bump("1.0.0-beta.0", "1.0.0-rc.0").is_pre_release_incompatible());
+        }
+
+        #[test]
+        fn pre_to_pre_different_base_is_incompatible() {
+            assert!(bump("0.1.1-alpha.0", "0.1.2-alpha.0").is_pre_release_incompatible());
+        }
+
+        #[test]
+        fn pre_to_stable_graduation_is_compatible() {
+            assert!(!bump("1.0.0-beta.0", "1.0.0").is_pre_release_incompatible());
+        }
+
+        #[test]
+        fn stable_to_stable_is_compatible() {
+            assert!(!bump("1.0.0", "1.0.1").is_pre_release_incompatible());
+            assert!(!bump("1.0.0", "1.1.0").is_pre_release_incompatible());
+            assert!(!bump("0.1.0", "0.1.1").is_pre_release_incompatible());
         }
     }
 
