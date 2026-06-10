@@ -641,7 +641,20 @@ fn adjust_workspace_crates_depending_on_adjusted_crates<'meta>(
 
             match crates.iter_mut().find(|c| c.package.id == wsp.id) {
                 Some(existing) => {
-                    changed |= maybe_promote_selected_dependency(existing, ctx, bump_when_needed)?;
+                    let promoted = maybe_promote_selected_dependency(existing, ctx, bump_when_needed)?;
+                    if !promoted {
+                        // Mark an existing unchanged, non-publishing dependent crate for a
+                        // manifest update when one of its workspace dependencies is getting
+                        // a version bump.
+                        if let dependency::Mode::NotForPublishing { adjustment, reason } = &mut existing.mode {
+                            if adjustment.is_none() && *reason == dependency::NoPublishReason::Unchanged {
+                                *adjustment = Some(ManifestAdjustment::DueToDependencyChange);
+                                changed = true;
+                            }
+                        }
+                    } else {
+                        changed = true;
+                    }
                 }
                 None => {
                     crates.push(Dependency {
