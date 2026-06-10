@@ -1,0 +1,11 @@
+[package]
+name = "mid"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+leaf = { path = "../leaf", version = "0.1.0" }
+utils = { path = "../utils", version = "0.1.0", optional = true }
+
+[build-dependencies]
+utils = { path = "../utils", version = "0.1.0" }
