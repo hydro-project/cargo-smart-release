@@ -257,9 +257,10 @@ fn forward_propagate_breaking_changes_for_manifest_updates<'meta>(
     let mut non_publishing_crates_with_safety_bumps = Vec::new();
     let mut backing = crates
         .iter()
-        .filter(
-            |c| matches!(&c.mode, dependency::Mode::ToBePublished { adjustment } if adjustment.bump().is_breaking()),
-        )
+        .filter(|c| {
+            matches!(&c.mode, dependency::Mode::ToBePublished { adjustment }
+                if adjustment.bump().is_breaking() || adjustment.bump().is_pre_release_incompatible())
+        })
         .map(ToOwned::to_owned)
         .collect::<Vec<_>>();
     let workspace_packages: Vec<_> = ctx
@@ -513,7 +514,7 @@ fn find_safety_bump_edits_backwards_from_crates_for_publish(
             continue;
         }
         match dep.mode.version_adjustment_bump() {
-            Some(dep_bump) if dep_bump.is_breaking() => {
+            Some(dep_bump) if dep_bump.is_breaking() || dep_bump.is_pre_release_incompatible() => {
                 if !edits.iter().any(|e| e.crates_idx == current_idx) {
                     edits.push(EditForPublish::from(current_idx, vec![dep_idx]));
                 }
