@@ -274,8 +274,16 @@ pub(crate) fn bump_package_with_spec(
     let desired_release = v;
     let (latest_release, next_release) = match ctx.crates_index.crate_(&package.name) {
         Some(published_crate) => {
-            let latest_release = semver::Version::parse(published_crate.highest_version().version())
-                .expect("valid version in crate index");
+            let latest_release = published_crate
+                .versions()
+                .iter()
+                .filter(|v| !v.is_yanked())
+                .filter_map(|v| semver::Version::parse(v.version()).ok())
+                .max()
+                .unwrap_or_else(|| {
+                    semver::Version::parse(published_crate.highest_version().version())
+                        .expect("valid version in crate index")
+                });
             let next_release = if latest_release >= desired_release {
                 desired_release.clone()
             } else {
@@ -320,10 +328,11 @@ pub(crate) fn bump_package(package: &Package, ctx: &Context, bump_when_needed: b
 /// or 0.0.0 if no stable version exists.
 fn find_last_stable_version(package: &Package, ctx: &Context) -> Version {
     if let Some(published_crate) = ctx.crates_index.crate_(&package.name) {
-        // Find highest version without a pre-release identifier
+        // Find highest version without a pre-release identifier, excluding yanked
         let stable = published_crate
             .versions()
             .iter()
+            .filter(|v| !v.is_yanked())
             .filter_map(|v| semver::Version::parse(v.version()).ok())
             .filter(|v| v.pre.is_empty())
             .max();
