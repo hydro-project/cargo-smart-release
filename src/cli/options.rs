@@ -37,6 +37,7 @@ pub enum SubCommands {
         ///
         /// Can be 'major', 'minor', 'patch', 'keep', 'auto', or 'prerelease'.
         /// With 'keep', the current version will be kept, useful if versions are specified by hand in the manifest.
+        /// Note that 'keep' ignores --pre-id entirely — the version is used as-is.
         /// With 'prerelease', the pre-release counter is incremented (errors if not already a pre-release).
         /// When --pre-id is set, 'major'/'minor'/'patch' produce a pre-release at that level, and 'auto'
         /// computes the level from commit history since the last stable release.
@@ -49,6 +50,10 @@ pub enum SubCommands {
         /// Specify the kind of version bump to apply to dependencies only.
         ///
         /// Can be 'major', 'minor', 'patch', 'keep', 'auto', or 'prerelease'.
+        /// With 'keep', the dependency version is unchanged and --pre-id is ignored.
+        ///
+        /// The --pre-id flag also applies to dependency bumps, so `-d patch --pre-id alpha` will
+        /// produce versions like 0.1.1-alpha.0 for dependencies.
         ///
         /// The default is 'auto', which derives the necessary information from the git commit history and
         /// conventional messages.
@@ -57,10 +62,11 @@ pub enum SubCommands {
 
         /// Pre-release identifier label (e.g. "beta", "alpha", "rc").
         ///
-        /// When set, modifies the behavior of --bump:
+        /// When set, modifies the behavior of --bump and --bump-dependencies:
         /// - With 'major'/'minor'/'patch': produces a pre-release at that level (e.g. --bump major --pre-id beta → 2.0.0-beta.0)
         /// - With 'auto': computes the bump level from commits since the last stable release and outputs a pre-release
         /// - With 'prerelease': changes the label (resetting the counter if different from current)
+        /// - With 'keep': has no effect — the version is used exactly as specified in the manifest
         ///
         /// Without --pre-id, 'major'/'minor'/'patch' produce stable versions and 'auto' behaves normally.
         #[clap(long, help_heading = Some("MAJOR"))]
