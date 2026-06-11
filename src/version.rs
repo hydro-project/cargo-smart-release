@@ -166,17 +166,27 @@ pub(crate) fn bump_package_with_spec(
                 } else {
                     let label = &ctx.pre_id;
 
-                    // Determine target base from commit history severity
+                    // Compute target base from last stable version
+                    let last_stable = find_last_stable_version(package, ctx);
+
+                    // Determine target base from commit history severity,
+                    // respecting 0.x semver conventions (breaking = minor for 0.x crates)
                     let base_level = if all_commits.history.iter().any(|item| item.message.breaking) {
-                        Major
+                        if is_pre_release(&last_stable) {
+                            Minor
+                        } else {
+                            Major
+                        }
                     } else if all_commits.history.iter().any(|item| item.message.kind == Some("feat")) {
-                        Minor
+                        if is_pre_release(&last_stable) {
+                            Patch
+                        } else {
+                            Minor
+                        }
                     } else {
                         Patch
                     };
 
-                    // Compute target base from last stable version
-                    let last_stable = find_last_stable_version(package, ctx);
                     let mut target_base = last_stable.clone();
                     bump_major_minor_patch(&mut target_base, base_level, "");
 
