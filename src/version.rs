@@ -198,6 +198,14 @@ pub(crate) fn bump_package_with_spec(
                     let mut target_base = last_stable.clone();
                     bump_major_minor_patch(&mut target_base, base_level, "");
 
+                    // If the package was already bumped higher (e.g. via a safety bump for
+                    // a breaking dependency), don't regress the base below the current
+                    // package version's major.minor.patch.
+                    let pkg_base = Version::new(v.major, v.minor, v.patch);
+                    if pkg_base > target_base {
+                        target_base = pkg_base;
+                    }
+
                     if v.major == target_base.major && v.minor == target_base.minor && v.patch == target_base.patch {
                         // Base already correct — increment counter
                         let existing_label = extract_pre_label(&v);
