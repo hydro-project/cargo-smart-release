@@ -195,11 +195,9 @@ pub fn crate_ref_segments<'h>(
                         return Ok(segments);
                     }
                     SegmentScope::UnreleasedSinceStable => {
-                        let tag_version = parse_possibly_prefixed_tag_version(
-                            tag_prefix.as_deref(),
-                            strip_tag_path(next_ref.name.as_ref()),
-                        );
-                        if let Some(_) = tag_version.filter(|v| !v.pre.is_empty()) {
+                        let tag_version =
+                            parse_possibly_prefixed_tag_version(tag_prefix, strip_tag_path(next_ref.name.as_ref()));
+                        if tag_version.is_some_and(|v| !v.pre.is_empty()) {
                             // Pre-release tag — keep accumulating commits
                             add_item_if_package_changed(
                                 package,
