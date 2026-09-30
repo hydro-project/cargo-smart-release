@@ -225,6 +225,41 @@ release-test = { path = "..", version = "0.8.0" }
     Ok(())
 }
 
+#[test]
+fn pre_release_versions_pin_dependents_with_exact_requirements() -> gix_testtools::Result {
+    let dir = fixture()?;
+    let root = dir.path();
+
+    // Cargo's default caret requirement matches later pre-releases of the same base version
+    // ("0.9.0-beta.0" matches 0.9.0-beta.1), but pre-releases may contain breaking changes.
+    // Dependents must therefore be pinned exactly.
+    let output = release(root, "minor", &["--execute", "--pre-id", "beta"])?;
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        fs::read_to_string(root.join("tools/fuzz/Cargo.toml"))?,
+        FUZZ_MANIFEST.replace("\"0.8.0\"", "\"=0.9.0-beta.0\""),
+        "pre-release dependencies are pinned with an exact requirement"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("tools/Cargo.toml"))?,
+        TOOLS_MANIFEST.replace("\"0.8.0\"", "\"=0.9.0-beta.0\"")
+    );
+
+    // Graduating to a stable release replaces our own pins with caret requirements again.
+    let output = release(root, "minor", &["--execute"])?;
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        fs::read_to_string(root.join("tools/fuzz/Cargo.toml"))?,
+        FUZZ_MANIFEST.replace("\"0.8.0\"", "\"^0.9.0\""),
+        "stable releases replace tool-generated pre-release pins with caret requirements"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("tools/Cargo.toml"))?,
+        TOOLS_MANIFEST.replace("\"0.8.0\"", "\"^0.9.0\"")
+    );
+    Ok(())
+}
+
 fn write(root: &Path, path: &str, content: &str) -> std::io::Result<()> {
     let path = root.join(path);
     fs::create_dir_all(path.parent().expect("fixture files have a parent"))?;

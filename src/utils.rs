@@ -62,6 +62,16 @@ pub fn version_req_unset_or_default(req: &VersionReq) -> bool {
     req.comparators.last().is_none_or(|comp| comp.op == semver::Op::Caret)
 }
 
+/// Returns `true` if `req` is an exact (`=`) requirement on a pre-release version, like `=1.0.0-beta.1`.
+///
+/// We generate such pins ourselves when releasing pre-release versions, so they may be rewritten
+/// on the next release, unlike other exact requirements which we consider user-provided.
+pub fn version_req_is_pre_release_pin(req: &VersionReq) -> bool {
+    req.comparators
+        .last()
+        .is_some_and(|comp| comp.op == semver::Op::Exact && !comp.pre.is_empty())
+}
+
 pub fn package_eq_dependency_ignore_dev_without_version(package: &Package, dependency: &Dependency) -> bool {
     (dependency.kind != DependencyKind::Development || !version_req_unset_or_default(&dependency.req))
         && package.name.as_str() == dependency.name
@@ -186,6 +196,42 @@ mod tests {
         #[test]
         fn zero_major_with_pre_identifier() {
             assert!(is_pre_release_version(&Version::parse("0.1.0-alpha.1").unwrap()));
+        }
+    }
+
+    mod version_req_is_pre_release_pin_fn {
+        use semver::VersionReq;
+
+        use crate::utils::version_req_is_pre_release_pin;
+
+        #[test]
+        fn exact_pre_release_is_a_pin() {
+            assert!(version_req_is_pre_release_pin(
+                &VersionReq::parse("=1.0.0-beta.1").unwrap()
+            ));
+            assert!(version_req_is_pre_release_pin(
+                &VersionReq::parse("=0.9.0-rc.0").unwrap()
+            ));
+        }
+
+        #[test]
+        fn exact_stable_is_not_a_pin() {
+            assert!(!version_req_is_pre_release_pin(&VersionReq::parse("=1.0.0").unwrap()));
+        }
+
+        #[test]
+        fn caret_pre_release_is_not_a_pin() {
+            assert!(!version_req_is_pre_release_pin(
+                &VersionReq::parse("1.0.0-beta.1").unwrap()
+            ));
+            assert!(!version_req_is_pre_release_pin(
+                &VersionReq::parse("^1.0.0-beta.1").unwrap()
+            ));
+        }
+
+        #[test]
+        fn unset_is_not_a_pin() {
+            assert!(!version_req_is_pre_release_pin(&VersionReq::parse("*").unwrap()));
         }
     }
 

@@ -64,3 +64,9 @@ The label lives in `Context::pre_id` (empty string = not specified).
 - `src/traverse.rs`: `breaking_version_bump()` uses `BumpSpec::PreRelease`
 - `src/cli/options.rs`: `--pre-id` flag
 - `src/cli/main.rs`: `to_bump_spec()` accepts "prerelease"
+- `src/command/release/manifest.rs`: dependents of a pre-release version are pinned with an
+  exact requirement (`=1.0.0-beta.1`) instead of the default caret requirement. Cargo's caret
+  matching considers later pre-releases of the same base version compatible
+  (`"1.0.0-beta.1"` matches `1.0.0-beta.2`), but pre-releases may break each other.
+  Such tool-generated pins are replaced by a regular caret requirement again on the next
+  stable release; user-provided exact requirements on stable versions still cause an error.

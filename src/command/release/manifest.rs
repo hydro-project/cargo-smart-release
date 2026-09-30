@@ -16,7 +16,10 @@ use crate::{
     changelog,
     changelog::{write::Linkables, Section},
     traverse::Dependency,
-    utils::{names_and_versions, try_to_published_crate_and_new_version, version_req_unset_or_default, will},
+    utils::{
+        names_and_versions, try_to_published_crate_and_new_version, version_req_is_pre_release_pin,
+        version_req_unset_or_default, will,
+    },
     version, ChangeLog,
 };
 
@@ -665,11 +668,13 @@ fn set_version_and_update_package_dependency(
                         && version::is_pre_release(new_version) // setting the lower bound unnecessarily can be harmful
                         // don't claim to be conservative if this is necessary anyway
                         && req_as_version(&version_req).is_some_and(|req_version| !version::rhs_is_breaking_bump_for_lhs(&req_version, new_version));
-                // Cargo's semver matching is strict for pre-release: ^1.0.0-beta.1 does NOT
-                // match 1.0.0-beta.2, so always update when the new version has a pre-release.
+                // Cargo's default caret requirement DOES match newer pre-releases with the same
+                // base version: "1.0.0-beta.1" matches 1.0.0-beta.2 (and 1.0.0). As pre-releases
+                // may contain breaking changes, force a rewrite to an exact `=` pin so cargo
+                // cannot silently upgrade dependents to a later, potentially incompatible pre-release.
                 let force_pre_release_update = !new_version.pre.is_empty();
                 if !version_req.matches(new_version) || force_update || force_pre_release_update {
-                    if !version_req_unset_or_default(&version_req) {
+                    if !version_req_unset_or_default(&version_req) && !version_req_is_pre_release_pin(&version_req) {
                         bail!(
                                 "{} has it's {} dependency set to a version requirement with comparator {} - cannot currently handle that.",
                                 package_name,
@@ -677,7 +682,13 @@ fn set_version_and_update_package_dependency(
                                 current_version_req
                             );
                     }
-                    let new_version = format!("^{new_version}");
+                    let new_version = if new_version.pre.is_empty() {
+                        format!("^{new_version}")
+                    } else {
+                        // Exact pin: cargo would otherwise consider later pre-releases of the same
+                        // base version compatible, but pre-releases may break each other.
+                        format!("={new_version}")
+                    };
                     if version_req.to_string() != new_version {
                         log::trace!(
                             "Pending '{}' {}manifest {} update: '{} = \"{}\"' (from {})",
